@@ -4,7 +4,8 @@ import math
 
 st.set_page_config(page_title="Plate Girder Designer - IS 800:2007", layout="wide")
 st.title("🏗️ Steel Plate Girder Designer (Shear Buckling + Auto‑Revision)")
-st.markdown("Design of welded plate girders as per **IS 800:2007 (Limit State Method)**")
+st.markdown("**👨‍🏫 Developer:** *Dr Hiteshkumar Santosh Patil, Assistant Professor, Civil Engineering Department, RCPIT, Shirpur*")
+st.markdown("Design as per **IS 800:2007 (Limit State Method)**")
 st.markdown("---")
 
 # ---------- Sidebar Inputs ----------
@@ -49,6 +50,7 @@ def calc_factored_loads(dl, ll, point_load, span, load_type, gamma_f=1.5):
         return Mu, Vu, 0.0, P_serv
 
 def economical_depth_iterative(Mu_kNm, fy, target_K=100):
+    """d = (M_u * K / f_y)^(1/3)""" 
     Mu_Nmm = Mu_kNm * 1e6
     d = (Mu_Nmm * target_K / fy) ** (1/3)
     d = max(400, min(3000, round(d / 10) * 10))
@@ -58,30 +60,34 @@ def required_plastic_modulus(Mu, fy, gamma_m0=1.10):
     return Mu * 1e6 * gamma_m0 / fy
 
 def design_web(d, Vu, fy, gamma_m1=1.25):
+    """t_w >= V_u * γ_m1 / (d * f_y/√3)  and  t_w >= d/200"""
     tw_min = max(6.0, d / 200.0)
     req_tw_shear = (Vu * 1000 * gamma_m1) / (d * (fy / math.sqrt(3)))
     tw = max(tw_min, req_tw_shear)
     tw = max(6.0, min(40.0, round(tw / 2) * 2))
     return tw
 
-# ----- Shear buckling resistance (Cl. 8.4.2.2) -----
-def shear_buckling_strength(d, tw, fy, has_stiffeners=False, tension_field=False):
+def shear_buckling_strength(d, tw, fy, has_stiffeners=False, stiff_spacing=None, tension_field=False):
     """
-    Returns nominal shear strength Vn (kN) and the method description.
-    tension_field = True only if end & intermediate stiffeners are provided.
+    Cl. 8.4.2.2: Shear buckling resistance.
+    Returns (Vn_kN, method_description, λ_w)
     """
     epsilon = math.sqrt(250 / fy)
-    web_slenderness = d / tw
-    # Shear buckling parameter λ_w
-    λ_w = math.sqrt(fy / (math.sqrt(3) * (math.pi**2 * 2e5 * (tw/d)**2 / (12*(1-0.3**2)))))  # simplified
-    # More direct formula as per code (Cl. 8.4.2.2):
-    # λ_w = (d/tw) / (37.4 * ε * k_v^0.5) , with k_v = 5.35 for simple supports (no stiffeners)
-    k_v = 5.35
-    if has_stiffeners:
-        k_v = 5.35 + 4.0 / (c/d)**2   # we assume c/d = 1.0 for simplicity
+    # k_v depends on stiffeners and spacing
+    if has_stiffeners and stiff_spacing:
+        c = stiff_spacing          # stiffener spacing (mm)
+        # ratio c/d
+        cd_ratio = c / d
+        if cd_ratio < 1.0:
+            k_v = 5.35 + 4.0 / (cd_ratio)**2
+        else:
+            k_v = 4.0 + 5.35 / (cd_ratio)**2
+    else:
+        k_v = 5.35   # no stiffeners or spacing > d
+    # λ_w = (d/tw) / (37.4 * ε * √k_v)
     λ_w = (d / tw) / (37.4 * epsilon * math.sqrt(k_v))
     
-    Av = d * tw  # shear area (mm²)
+    Av = d * tw   # shear area (mm²)
     if λ_w <= 0.8:
         τ_b = fy / math.sqrt(3)
         method = "Simple post‑critical (λ_w ≤ 0.8)"
@@ -92,16 +98,14 @@ def shear_buckling_strength(d, tw, fy, has_stiffeners=False, tension_field=False
         τ_b = fy / (math.sqrt(3) * λ_w**2)
         method = "Simple post‑critical (λ_w ≥ 1.2)"
     
-    Vn = Av * τ_b / 1000  # kN
+    Vn = Av * τ_b / 1000   # kN
     
-    # Tension field method (Cl. 8.4.2.2.3)
-    if tension_field and has_stiffeners:
-        # additional strength from tension field action
-        # simplified: add 0.5 * tw * d * fy * (1 - 1/λ_w^2) / √3  etc.
-        if λ_w > 1.0:
-            Vtf = Av * (fy / math.sqrt(3)) * (1 - 1/λ_w**2) / 1000
-            Vn += Vtf
-            method += " + Tension field contribution"
+    # Tension field contribution (Cl. 8.4.2.2.3)
+    if tension_field and has_stiffeners and λ_w > 1.0:
+        Vtf = Av * (fy / math.sqrt(3)) * (1 - 1/λ_w**2) / 1000
+        Vn += Vtf
+        method += " + Tension field action"
+    
     return Vn, method, λ_w
 
 def check_web_slenderness_full(d, tw, fy, has_stiffeners=False, stiff_spacing=None):
@@ -154,11 +158,9 @@ def compute_section_properties(d, tw, bf, tf):
 def moment_capacity(Zp_actual, fy, gamma_m0=1.10):
     return Zp_actual * fy / gamma_m0 / 1e6
 
-def shear_capacity(d, tw, fy, gamma_m1=1.25, has_stiffeners=False, tension_field=False):
-    Vn, method, λ_w = shear_buckling_strength(d, tw, fy, has_stiffeners, tension_field)
-    Vd = Vn / 1.25  # γ_m1 for shear, but Vn already includes partial factor? We'll divide again?
-    # Actually Vn is nominal strength, design strength Vd = Vn / γ_m1
-    Vd = Vn / gamma_m1
+def shear_capacity(d, tw, fy, has_stiffeners=False, stiff_spacing=None, tension_field=False):
+    Vn, method, λ_w = shear_buckling_strength(d, tw, fy, has_stiffeners, stiff_spacing, tension_field)
+    Vd = Vn / 1.25   # γ_m1 = 1.25
     return Vd, method, λ_w
 
 def deflection_check(span_m, Ix_cm4, w_serv, P_serv, load_type, E=2.0e5):
@@ -195,19 +197,15 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     # Initial flange sizes
     bf, tf, _ = design_flanges(d, tw, Zp_req, fy, manual_bf)
     
-    # We'll now iterate to satisfy all checks
+    # Iterate to satisfy all checks
     max_iter = 20
     iter_count = 0
     revised = False
     while iter_count < max_iter:
-        # Compute properties
         Zp_actual, Ix_cm4, weight = compute_section_properties(d, tw, bf, tf)
         Md = moment_capacity(Zp_actual, fy)
-        # Stiffener requirement
-        need_stiff, stiff_spacing = stiffener_requirements(d, tw, fy, Vu, Md)  # temporary Vd not known
-        Vd, shear_method, λ_w = shear_capacity(d, tw, fy, need_stiff, use_tension_field)
-        
-        # Checks
+        need_stiff, stiff_spacing = stiffener_requirements(d, tw, fy, Vu, Md)
+        Vd, shear_method, λ_w = shear_capacity(d, tw, fy, need_stiff, stiff_spacing, use_tension_field)
         web_ok, web_limit, web_actual, web_desc = check_web_slenderness_full(d, tw, fy, need_stiff, stiff_spacing)
         shear_ok = Vu <= Vd
         moment_ok = Mu <= Md
@@ -216,41 +214,34 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
         
         if web_ok and shear_ok and moment_ok and defl_ok:
             break
-        
-        # Revise section
         revised = True
-        # Increase web thickness if web slenderness fails or shear fails
         if not web_ok or not shear_ok:
             tw += 2
             tw = min(tw, 40)
-        # Increase flange thickness if moment fails or deflection slightly high
         if not moment_ok or delta > 1.2 * delta_limit:
             tf += 2
             if tf < 40:
                 tf = min(tf, 60)
             else:
                 tf += 5
-        # If nothing else, increase overall depth
         if web_ok and moment_ok and not defl_ok:
             d += 20
             d = min(d, 2500)
-            # Re‑compute web thickness for new d
             tw = max(tw, design_web(d, Vu, fy))
-        # Re‑compute flange for new d, tw
         bf, tf, _ = design_flanges(d, tw, Zp_req, fy, manual_bf)
         iter_count += 1
     
-    # Final properties after revision
+    # Final properties
     Zp_actual, Ix_cm4, weight = compute_section_properties(d, tw, bf, tf)
     Md = moment_capacity(Zp_actual, fy)
     need_stiff, stiff_spacing = stiffener_requirements(d, tw, fy, Vu, Md)
-    Vd, shear_method, λ_w = shear_capacity(d, tw, fy, need_stiff, use_tension_field)
+    Vd, shear_method, λ_w = shear_capacity(d, tw, fy, need_stiff, stiff_spacing, use_tension_field)
     web_ok, web_limit, web_actual, web_desc = check_web_slenderness_full(d, tw, fy, need_stiff, stiff_spacing)
     delta, delta_limit = deflection_check(span, Ix_cm4, w_serv, P_serv, load_type)
     ratio_moment = Mu / Md
     ratio_shear = Vu / Vd
     
-    # Display summary of revisions
+    # ---------- Display Results with Formulas ----------
     st.header("📊 Design Calculations (Step by Step)")
     if revised:
         st.info(f"⚠ Section was automatically revised after {iter_count} iteration(s) to satisfy all checks.")
@@ -258,82 +249,66 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
         st.success("✅ Initial design passed all checks (no revision needed).")
     
     # 1. Factored loads
-    st.subheader("1️⃣ Factored Loads & Required Plastic Modulus")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.latex(f"M_u = {Mu:.1f}\\ \\text{{kN·m}}, \\quad V_u = {Vu:.1f}\\ \\text{{kN}}")
-        st.latex(f"Z_{{p,\\text{{req}}}} = \\frac{{M_u \\cdot \\gamma_{{m0}}}}{{f_y}} = {Zp_req:.0f}\\ \\text{{mm}}^3")
-    with col2:
-        st.metric("Factored Moment", f"{Mu:.1f} kN·m")
-        st.metric("Factored Shear", f"{Vu:.1f} kN")
+    with st.expander("📐 1. Factored Loads & Required Plastic Modulus", expanded=True):
+        st.latex(r"\text{For UDL: } M_u = \frac{1.5 \times (DL+LL) \times L^2}{8}, \quad V_u = \frac{1.5 \times (DL+LL) \times L}{2}")
+        st.latex(r"\text{For point load: } M_u = \frac{1.5 \times P \times L}{4}, \quad V_u = \frac{1.5 \times P}{2}")
+        st.latex(f"M_u = {Mu:.1f}\ \text{{kN·m}},\quad V_u = {Vu:.1f}\ \text{{kN}}")
+        st.latex(r"Z_{p,\text{req}} = \frac{M_u \cdot \gamma_{m0}}{f_y} = \frac{" + f"{Mu:.1f}\times10^6 \times 1.1}{fy}" + f" = {Zp_req:.0f}\ \text{{mm}}^3")
     
     # 2. Economical depth
-    st.subheader("2️⃣ Economical Depth (Cl. 8.6 - approximate method)")
-    st.latex(r"d = \left( \frac{M_u \cdot K}{f_y} \right)^{1/3}, \quad K = \frac{d}{t_w}")
-    st.write(f"Iteration gave K = {d/tw:.1f} → final d = {d} mm")
-    st.success(f"✅ **Economical web depth adopted:** `{d} mm`")
+    with st.expander("📐 2. Economical Depth (Cl. 8.6)", expanded=True):
+        st.latex(r"d = \left( \frac{M_u \cdot K}{f_y} \right)^{1/3}, \quad K = \frac{d}{t_w}")
+        st.latex(f"K = {d/tw:.1f} \quad \Rightarrow \quad d = {d}\ \text{{mm}}")
     
     # 3. Web shear design
-    st.subheader("3️⃣ Web Design (Cl. 8.6.1 & 8.4.2.2)")
-    st.latex(f"t_w \\ge \\frac{{V_u \\gamma_{{m1}}}}{{d \\cdot (f_y/\\sqrt{{3}})}} = \\frac{{{Vu}\\times1000 \\times 1.25}}{{{d} \\times ({fy}/\\sqrt{{3}})}} = {design_web(d, Vu, fy):.1f}\\ \\text{{mm}}")
-    st.latex(f"t_w \\ge \\frac{{d}}{{200}} = \\frac{{{d}}}{{200}} = {d/200:.1f}\\ \\text{{mm}}")
-    st.success(f"✅ **Web thickness adopted:** `{tw} mm`")
+    with st.expander("📐 3. Web Thickness (Cl. 8.4.2.2)", expanded=True):
+        st.latex(r"t_w \ge \frac{V_u \gamma_{m1}}{d \cdot (f_y/\sqrt{3})} \quad \text{and} \quad t_w \ge d/200")
+        st.latex(f"t_w = {tw}\ \text{{mm}}")
     
     # 4. Shear buckling resistance
-    st.subheader("4️⃣ Shear Buckling Resistance (Cl. 8.4.2.2)")
-    st.latex(f"\\text{{Shear slenderness }} λ_w = {λ_w:.3f}")
-    st.write(f"**Method:** {shear_method}")
-    st.latex(f"V_n = {shear_capacity(d, tw, fy, need_stiff, use_tension_field)[0] * 1.25:.1f}\\ \\text{{kN}}")
-    st.latex(f"V_d = V_n / γ_{{m1}} = {Vd:.2f}\\ \\text{{kN}}")
-    st.write(f"Shear check: {Vu:.1f} kN {'≤' if shear_ok else '>'} {Vd:.2f} kN → {'OK' if shear_ok else 'NOT OK'}")
+    with st.expander("📐 4. Shear Buckling Resistance (Cl. 8.4.2.2)", expanded=True):
+        st.latex(r"\lambda_w = \frac{d/t_w}{37.4\,\varepsilon\sqrt{k_v}}, \quad \varepsilon = \sqrt{250/f_y}")
+        st.latex(f"\lambda_w = {λ_w:.3f}")
+        st.latex(r"\tau_b = \begin{cases} f_y/\sqrt{3} & \lambda_w \le 0.8 \\ [1-0.8(\lambda_w-0.8)]f_y/\sqrt{3} & 0.8<\lambda_w<1.2 \\ f_y/(\sqrt{3}\,\lambda_w^2) & \lambda_w\ge1.2 \end{cases}")
+        st.latex(f"\\tau_b \\text{{ from {shear_method}}}")
+        st.latex(f"V_n = A_v \cdot \\tau_b = {shear_capacity(d,tw,fy,need_stiff,stiff_spacing,use_tension_field)[0]*1.25:.1f}\ \text{{kN}}")
+        st.latex(f"V_d = V_n / \gamma_{{m1}} = {Vd:.2f}\ \text{{kN}}")
     
     # 5. Web slenderness
-    st.subheader("5️⃣ Web Slenderness (Cl. 8.6.1.1)")
-    st.latex(f"\\frac{{d}}{{t_w}} = {web_actual:.1f}")
-    st.write(f"**Criteria:** {web_desc}")
-    if web_ok:
-        st.success(f"✓ d/tw = {web_actual:.1f} ≤ {web_limit:.1f}")
-    else:
-        st.error(f"✗ d/tw = {web_actual:.1f} > {web_limit:.1f}")
+    with st.expander("📐 5. Web Slenderness (Cl. 8.6.1.1)", expanded=True):
+        st.latex(r"\frac{d}{t_w} = " + f"{web_actual:.1f}")
+        st.write(f"**Criteria:** {web_desc}")
+        st.write(f"→ {'✓ OK' if web_ok else '✗ NOT OK'}")
     
-    # 6. Flange design
-    st.subheader("6️⃣ Flange Design (Plastic Section Modulus)")
-    st.latex(f"Z_{{p,\\text{{actual}}}} = {Zp_actual:.0f}\\ \\text{{mm}}^3")
-    st.latex(f"M_d = \\frac{{Z_p f_y}}{{\\gamma_{{m0}}}} = {Md:.2f}\\ \\text{{kN·m}}")
-    st.latex(f"b_f = {bf:.0f}\\ \\text{{mm}}, \\quad t_f = {tf:.1f}\\ \\text{{mm}}")
-    epsilon = math.sqrt(250 / fy)
-    compact_limit = 9.4 * epsilon
-    bf_tf = bf / tf
-    st.latex(f"\\text{{Flange compactness: }} \\frac{{b_f}}{{t_f}} = {bf_tf:.1f} \\le 9.4\\varepsilon = {compact_limit:.1f}")
-    if bf_tf <= compact_limit:
-        st.success("✓ Flange is compact (Class 1/2).")
-    else:
-        st.error("✗ Flange is slender — revise manually.")
+    # 6. Flange design & section capacity
+    with st.expander("📐 6. Flange Design & Section Capacity", expanded=True):
+        st.latex(r"Z_{p,\text{web}} = \frac{t_w d^2}{4} = " + f"{Zp_actual - bf*tf*(d+tf):.0f}\ \text{{mm}}^3")
+        st.latex(r"A_{f,\text{req}} = \frac{Z_{p,\text{req}} - Z_{p,\text{web}}}{d} \approx " + f"{(Zp_req - (tw*d**2/4))/d:.0f}\ \text{{mm}}^2")
+        st.latex(f"b_f = {bf:.0f}\ \text{{mm}}, \quad t_f = {tf:.1f}\ \text{{mm}}")
+        st.latex(f"Z_{{p,\text{{actual}}}} = {Zp_actual:.0f}\ \text{{mm}}^3")
+        st.latex(f"M_d = \frac{{Z_p f_y}}{{\gamma_{{m0}}}} = {Md:.2f}\ \text{{kN·m}}")
+        st.latex(f"b_f/t_f = {bf_tf:.1f} \le 9.4\varepsilon = {9.4*math.sqrt(250/fy):.1f} \Rightarrow {'compact' if bf/tf <= 9.4*math.sqrt(250/fy) else 'slender'}")
     
     # 7. Deflection
-    st.subheader("7️⃣ Serviceability: Deflection (Cl. 5.6.1)")
-    st.latex(f"I_x = {Ix_cm4:.1f}\\ \\text{{cm}}^4")
-    st.latex(f"\\delta = {delta:.1f}\\ \\text{{mm}}, \\quad \\delta_{{\\text{{limit}}}} = {delta_limit:.1f}\\ \\text{{mm}}")
-    if delta <= delta_limit:
-        st.success(f"✓ Deflection OK")
-    else:
-        st.warning(f"⚠ High deflection — consider larger girder.")
+    with st.expander("📐 7. Deflection (Cl. 5.6.1)", expanded=True):
+        st.latex(r"\delta_{\text{limit}} = L/300 = " + f"{delta_limit:.1f}\ \text{{mm}}")
+        st.latex(f"\\delta = {delta:.1f}\ \text{{mm}} \Rightarrow {'OK' if delta<=delta_limit else 'NOT OK'}")
     
-    # 8. Intermediate stiffeners
-    st.subheader("8️⃣ Intermediate Stiffeners (Cl. 8.7.3)")
-    if need_stiff:
-        st.warning(f"⚠ Stiffeners required at spacing ≤ {stiff_spacing} mm (≤ 1.5d).")
-    else:
-        st.success("✅ No intermediate stiffeners required.")
+    # 8. Stiffeners
+    with st.expander("📐 8. Intermediate Stiffeners (Cl. 8.7.3)", expanded=True):
+        if need_stiff:
+            st.warning(f"Stiffeners required at spacing ≤ {stiff_spacing} mm")
+        else:
+            st.success("No intermediate stiffeners required")
     
     # 9. Material estimate
     total_weight = weight * span
-    st.subheader("9️⃣ Material Estimate")
+    st.subheader("💰 Material Estimate")
     col1, col2 = st.columns(2)
     col1.metric("Weight per meter", f"{weight:.0f} kg/m")
     col2.metric("Total weight", f"{total_weight:.0f} kg ({total_weight/1000:.2f} tonnes)")
     
-    # 10. Final Design Summary Table
+    # 10. Final Summary Table
     st.subheader("📋 Final Design Summary Table (After Auto‑Revision)")
     summary_data = {
         "Parameter": [
@@ -361,19 +336,6 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     }
     st.table(summary_data)
     
-    # Engineering Notes
-    st.subheader("📝 Engineering Notes")
-    st.markdown(f"""
-    - **Material**: All steel plates are {steel_grade} (f_y = {fy} MPa).
-    - **Shear buckling**: Designed using **{shear_method}** as per Cl. 8.4.2.2.
-    - **Web slenderness**: {web_desc} → {'✓ OK' if web_ok else '✗ NOT OK (revised)'}.
-    - **Flange compactness**: b_f/t_f = {bf_tf:.1f} ≤ {compact_limit:.1f} → compact.
-    - **Auto‑revision**: The section was automatically adjusted to satisfy all limit states.
-    """)
-    
-    # Developer name
-    st.markdown("---")
-    st.markdown("**👨‍🏫 Developer:** *Dr Hiteshkumar Santosh Patil, Assistant Professor, Civil Engineering Department, RCPIT, Shirpur*")
     st.success("✅ Design completed. All checks are as per IS 800:2007.")
     
 else:
