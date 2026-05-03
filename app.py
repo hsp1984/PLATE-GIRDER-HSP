@@ -255,11 +255,13 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     with st.expander("📐 4. Shear Buckling Resistance (Cl. 8.4.2.2)", expanded=True):
         st.latex(r"\lambda_w = \frac{d/t_w}{37.4\,\varepsilon\sqrt{k_v}},\quad \varepsilon = \sqrt{250/f_y}")
         st.latex(f"\\lambda_w = {λ_w:.3f}")
-        st.latex(r"\tau_b = \begin{cases}
+        st.latex(r"""
+        \tau_b = \begin{cases}
         f_y/\sqrt{3} & \lambda_w \le 0.8 \\
-        [1-0.8(\lambda_w-0.8)]f_y/\sqrt{3} & 0.8<\lambda_w<1.2 \\
+        [1-0.8(\lambda_w-0.8)]\,f_y/\sqrt{3} & 0.8<\lambda_w<1.2 \\
         f_y/(\sqrt{3}\,\lambda_w^2) & \lambda_w\ge1.2
-        \end{cases}")
+        \end{cases}
+        """)
         st.latex(f"\\tau_b \\text{{ from {shear_method}}}")
         Vn_temp = shear_buckling_strength(d, tw, fy, need_stiff, stiff_spacing, use_tension_field)[0]
         st.latex(f"V_n = A_v \\tau_b = {Vn_temp:.1f} \\, \\text{{kN}}")
