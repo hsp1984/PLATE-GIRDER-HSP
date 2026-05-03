@@ -31,8 +31,8 @@ with st.sidebar:
     st.info(f"Yield Strength (fy) = {fy} MPa")
     
     st.header("Design Parameters")
-    gamma_m0 = 1.1  # partial safety factor for yielding
-    gamma_m1 = 1.25  # partial safety factor for buckling
+    gamma_m0 = 1.1
+    gamma_m1 = 1.25
     
     st.header("Optional: Manual Flange Width")
     manual_bf = st.number_input("Flange Width (mm) - 0 for auto", min_value=0, value=0, step=10)
@@ -45,13 +45,13 @@ def calc_required_zp(Mu, fy, gamma_m0=1.1):
 def calc_factored_load(dl, ll, point_load, load_type):
     """Calculate factored moment and shear"""
     if load_type == "Uniformly Distributed Load (UDL)":
-        wu = 1.5 * (dl + ll)  # kN/m
-        Mu = wu * span**2 / 8  # kN-m
-        Vu = wu * span / 2  # kN
+        wu = 1.5 * (dl + ll)
+        Mu = wu * span**2 / 8
+        Vu = wu * span / 2
     else:
-        Pu = 1.5 * point_load  # kN
-        Mu = Pu * span / 4  # kN-m
-        Vu = Pu / 2  # kN
+        Pu = 1.5 * point_load
+        Mu = Pu * span / 4
+        Vu = Pu / 2
     return Mu, Vu
 
 def design_plate_girder(span_m, Mu_kNm, Vu_kN, fy, manual_bf=0):
@@ -59,20 +59,19 @@ def design_plate_girder(span_m, Mu_kNm, Vu_kN, fy, manual_bf=0):
     span_mm = span_m * 1000
     
     # Initial web depth (span/10 to span/12)
-    d = span_mm / 11  # mm
-    d = max(500, min(2500, round(d / 10) * 10))  # Round to nearest 10mm
+    d = span_mm / 11
+    d = max(500, min(2500, round(d / 10) * 10))
     
     # Web thickness based on shear buckling and minimum requirements
     epsilon = np.sqrt(250 / fy)
-    tw_min = max(6, d / 200)  # Minimum thickness
+    tw_min = max(6, d / 200)
     tw = max(tw_min, round(Vu * 1000 * gamma_m1 / (d * (fy / np.sqrt(3))) / 10) * 10)
     tw = max(6, min(25, round(tw)))
     
     # Required Zp
-    Mu_Nmm = Mu_kNm * 1e6
     Zp_req = calc_required_zp(Mu_kNm, fy)
     
-    # Calculate web contribution to Zp
+    # Web contribution to Zp
     Zp_web = tw * d**2 / 4
     
     # Required flange area
@@ -82,7 +81,7 @@ def design_plate_girder(span_m, Mu_kNm, Vu_kN, fy, manual_bf=0):
     if manual_bf > 0:
         bf = manual_bf
     else:
-        bf = max(150, d / 4)  # Flange width around d/4
+        bf = max(150, d / 4)
         bf = round(bf / 10) * 10
     
     tf = max(8, round(Af_req / bf))
@@ -92,7 +91,6 @@ def design_plate_girder(span_m, Mu_kNm, Vu_kN, fy, manual_bf=0):
     bf_tf_ratio = bf / tf
     compact_limit = 9.4 * epsilon
     
-    # Adjust if flange too slender
     if bf_tf_ratio > compact_limit:
         tf = max(tf, bf / (0.9 * compact_limit))
         tf = round(tf)
@@ -100,34 +98,32 @@ def design_plate_girder(span_m, Mu_kNm, Vu_kN, fy, manual_bf=0):
     # Recalculate actual Zp
     Zp_actual = tw * d**2 / 4 + bf * tf * (d + tf)
     
-    # Check web slenderness
+    # Web slenderness and stiffeners
     web_slenderness = d / tw
     needs_stiffeners = web_slenderness > 67 * epsilon
     stiffener_spacing = None
     if needs_stiffeners:
-        # Calculate stiffener spacing based on shear capacity
-        tau_cr_factor = 0.8  # simplified
         stiffener_spacing = min(1.5 * d, 3000)
         stiffener_spacing = round(stiffener_spacing / 100) * 100
     
     # Shear capacity
-    Vd = tw * d * (fy / np.sqrt(3)) / gamma_m1 / 1000  # kN
+    Vd = tw * d * (fy / np.sqrt(3)) / gamma_m1 / 1000
     shear_ratio = Vu / Vd if Vd > 0 else 999
     
-    # Moment capacity (simplified)
-    Md = Zp_actual * fy / gamma_m0 / 1e6  # kN-m
+    # Moment capacity
+    Md = Zp_actual * fy / gamma_m0 / 1e6
     moment_ratio = Mu_kNm / Md if Md > 0 else 999
     
     # Deflection check (service load)
     if load_type == "Uniformly Distributed Load (UDL)":
-        w_serv = dl + ll  # kN/m
-        Ix = (tw * d**3 / 12 + 2 * (bf * tf * ((d + tf)/2)**2)) / 10000  # cm^4
-        delta = 5 * w_serv * (span_m * 1000)**4 / (384 * 2e5 * Ix * 10**4)  # mm
-    else:
-        P_serv = point_load  # kN
+        w_serv = dl + ll
         Ix = (tw * d**3 / 12 + 2 * (bf * tf * ((d + tf)/2)**2)) / 10000
-        delta = P_serv * 1000 * (span_m * 1000)**3 / (48 * 2e5 * Ix * 10**4)  # mm
-    delta_limit = span_m * 1000 / 300  # mm
+        delta = 5 * w_serv * (span_m * 1000)**4 / (384 * 2e5 * Ix * 10**4)
+    else:
+        P_serv = point_load
+        Ix = (tw * d**3 / 12 + 2 * (bf * tf * ((d + tf)/2)**2)) / 10000
+        delta = P_serv * 1000 * (span_m * 1000)**3 / (48 * 2e5 * Ix * 10**4)
+    delta_limit = span_m * 1000 / 300
     
     return {
         'd': d, 'tw': tw, 'bf': bf, 'tf': tf,
@@ -145,44 +141,38 @@ def plot_plate_girder(design, span_m):
     """Create detailed visualization of the plate girder"""
     fig, ax = plt.subplots(figsize=(12, 5))
     
-    # Scale factors for visualization
     d = design['d']
     bf = design['bf']
     tf = design['tf']
     tw = design['tw']
-    span_px = 1200  # pixels for span in plot
+    span_px = 1200
     scale_x = span_px / (span_m * 1000)
     
-    # Convert dimensions to plot units
-    d_plot = d / 10  # cm for plotting at scale
+    d_plot = d / 10
     bf_plot = bf / 10
     tf_plot = tf / 10
     tw_plot = tw / 10
     span_plot = span_m * 100
     y_center = 10
     
-    # Web rectangle
     web_x = 50
     web_width = span_plot - 100
     web_rect = Rectangle((web_x, y_center - d_plot/2), web_width, d_plot,
                          linewidth=1.5, edgecolor='black', facecolor='lightblue', alpha=0.7)
     ax.add_patch(web_rect)
     
-    # Top flange
     top_flange = Rectangle((web_x, y_center - d_plot/2 - tf_plot), web_width, tf_plot,
                            linewidth=1.5, edgecolor='black', facecolor='steelblue')
     ax.add_patch(top_flange)
     
-    # Bottom flange
     bottom_flange = Rectangle((web_x, y_center + d_plot/2), web_width, tf_plot,
                               linewidth=1.5, edgecolor='black', facecolor='steelblue')
     ax.add_patch(bottom_flange)
     
-    # Stiffeners if required
     if design['needs_stiffeners'] and design['stiffener_spacing']:
         spacing_mm = design['stiffener_spacing']
-        spacing_plot = spacing_mm / 10  # cm
-        stiffener_width = 10  # mm in plot units (1 cm)
+        spacing_plot = spacing_mm / 10
+        stiffener_width = 10
         x_start = web_x + spacing_plot
         while x_start < web_x + web_width:
             stiffener = Rectangle((x_start, y_center - d_plot/2 - tf_plot/2),
@@ -191,13 +181,11 @@ def plot_plate_girder(design, span_m):
             ax.add_patch(stiffener)
             x_start += spacing_plot
     
-    # Add dimension labels
     ax.annotate(f'Web: {d}mm', xy=(web_x + 20, y_center), fontsize=9, ha='center', 
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     ax.annotate(f'Flange: {bf}×{tf}mm', xy=(web_x + web_width - 80, y_center + d_plot/2 + tf_plot/2), 
                 fontsize=9, ha='center', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
-    # Draw supports
     support_x = web_x
     support_width = 40
     support_height = 20
@@ -209,14 +197,12 @@ def plot_plate_girder(design, span_m):
                              support_width, support_height, linewidth=2, edgecolor='black', facecolor='gray')
     ax.add_patch(support_rect2)
     
-    # Span dimension line
     ax.annotate('', xy=(web_x, y_center - d_plot/2 - tf_plot - 40), 
                 xytext=(web_x + web_width, y_center - d_plot/2 - tf_plot - 40),
                 arrowprops=dict(arrowstyle='<->', lw=1.5))
     ax.annotate(f'Span = {span_m}m', xy=(web_x + web_width/2, y_center - d_plot/2 - tf_plot - 55),
                 ha='center', fontsize=11, fontweight='bold')
     
-    # Axes settings
     ax.set_xlim(0, span_plot + 100)
     ax.set_ylim(y_center - d_plot/2 - tf_plot - 100, y_center + d_plot/2 + tf_plot + 50)
     ax.set_aspect('equal')
@@ -229,25 +215,18 @@ def plot_plate_girder(design, span_m):
 # Main calculation and display
 if st.sidebar.button("Design Plate Girder", type="primary", use_container_width=True):
     with st.spinner("Designing plate girder..."):
-        # Calculate factored loads
         Mu, Vu = calc_factored_load(dl, ll, point_load, load_type)
-        
-        # Design the girder
         design = design_plate_girder(span, Mu, Vu, fy, manual_bf)
         
-        # Display results in columns
         col1, col2 = st.columns([2, 1])
         
         with col1:
             st.subheader("📊 Design Summary")
-            
-            # Moment and shear
             st.metric("Factored Bending Moment", f"{design['Mu']:.1f} kN·m", 
                      delta=f"Capacity: {design['Md']:.1f} kN·m", delta_color="inverse")
             st.metric("Factored Shear Force", f"{design['Vu']:.1f} kN", 
                      delta=f"Capacity: {design['Vd']:.1f} kN", delta_color="inverse")
             
-            # Section properties
             st.subheader("📐 Section Dimensions")
             dim_col1, dim_col2, dim_col3 = st.columns(3)
             dim_col1.metric("Web Depth", f"{design['d']} mm")
@@ -257,7 +236,6 @@ if st.sidebar.button("Design Plate Girder", type="primary", use_container_width=
             dim_col3.metric("Web Slenderness (d/tw)", f"{design['web_slenderness']:.0f}")
             dim_col3.metric("Flange Compactness (bf/tf)", f"{design['compact_ratio']:.1f}")
             
-            # Checks
             st.subheader("✅ Design Checks")
             chk1, chk2, chk3 = st.columns(3)
             chk1.success(f"✓ Moment: {design['moment_ratio']:.2f} ≤ 1")
@@ -267,7 +245,6 @@ if st.sidebar.button("Design Plate Girder", type="primary", use_container_width=
             else:
                 chk3.error(f"✗ Deflection: {design['delta']:.1f}mm > {design['delta_limit']:.0f}mm")
             
-            # Stiffener recommendation
             if design['needs_stiffeners']:
                 st.warning(f"⚠️ Web requires stiffeners (d/tw = {design['web_slenderness']:.0f} > 67ε = {67*design['compact_limit']/9.4:.0f})")
                 st.info(f"Recommended stiffener spacing: {design['stiffener_spacing']} mm (max)")
@@ -276,7 +253,6 @@ if st.sidebar.button("Design Plate Girder", type="primary", use_container_width=
         
         with col2:
             st.subheader("📈 Performance Summary")
-            # Progress bars for utilization ratios
             st.markdown("**Moment Utilization**")
             st.progress(min(design['moment_ratio'], 1.0))
             st.caption(f"{design['moment_ratio']*100:.1f}%")
@@ -286,26 +262,23 @@ if st.sidebar.button("Design Plate Girder", type="primary", use_container_width=
             st.caption(f"{design['shear_ratio']*100:.1f}%")
             
             st.markdown("**Deflection Ratio**")
-            defl_ratio = design['delta'] / design['delta_limit']
+            defl_ratio = design['delta'] / design['delta_limit'] if design['delta_limit'] > 0 else 1
             st.progress(min(defl_ratio, 1.0))
             st.caption(f"Span/{design['delta_limit']/design['delta']*span:.0f}" if design['delta']>0 else "N/A")
         
-        # Detailed figure
         st.subheader("📐 Detailed Plate Girder Drawing")
         fig = plot_plate_girder(design, span)
         st.pyplot(fig)
         
-        # Material estimate
         st.subheader("📦 Material Estimate")
         weight_per_m = (design['d']/1000 * design['tw']/1000 + 
-                        2 * design['bf']/1000 * design['tf']/1000) * 7850  # kg/m
+                        2 * design['bf']/1000 * design['tf']/1000) * 7850
         total_weight = weight_per_m * span
         col_w1, col_w2, col_w3 = st.columns(3)
         col_w1.metric("Weight per meter", f"{weight_per_m:.0f} kg/m")
         col_w2.metric("Total weight", f"{total_weight:.0f} kg ({total_weight/1000:.1f} tonnes)")
         col_w3.metric("Steel grade", steel_grade)
         
-        # Design notes
         with st.expander("📖 Design Assumptions & Notes"):
             st.markdown("""
             **Design Methodology (IS 800:2007)**
@@ -326,7 +299,6 @@ if st.sidebar.button("Design Plate Girder", type="primary", use_container_width=
 else:
     st.info("👈 Enter design parameters in the sidebar and click 'Design Plate Girder' to begin")
     
-    # Show preview of what to expect
     st.markdown("""
     ### How to use this tool:
     1. **Enter span** - Clear span of the plate girder (5-50m)
@@ -342,6 +314,3 @@ else:
     - 📊 Material quantity estimation
     - 📖 Design notes and assumptions
     """)
-    
-    # Example image placeholder
-    st.image("https://via.placeholder.com/800x200?text=Plate+Girder+Diagram+Will+Appear+Here", use_container_width=True)
