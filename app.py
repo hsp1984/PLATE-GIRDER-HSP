@@ -65,11 +65,35 @@ def design_web(d, Vu, fy, gamma_m1=1.25):
     tw = max(6.0, min(40.0, round(tw / 2) * 2))
     return tw
 
-def check_web_slenderness(d, tw, fy):
+# ---- Updated web slenderness check with full Cl. 8.6.1.1 criteria ----
+def check_web_slenderness_full(d, tw, fy, has_stiffeners=False, stiff_spacing=None):
+    """
+    Evaluate web slenderness d/tw against limits from IS 800:2007 Cl. 8.6.1.1.
+    Returns: (is_ok, limit_value, actual_ratio, description)
+    """
     epsilon = math.sqrt(250 / fy)
-    limit = 67 * epsilon
     actual = d / tw
-    return actual <= limit, limit, actual
+    
+    if not has_stiffeners:
+        # Ordinary beam without transverse stiffeners
+        limit = 67 * epsilon
+        desc = f"Without transverse stiffeners: d/tw ≤ 67ε = {limit:.1f}"
+        ok = actual <= limit
+    else:
+        # With transverse stiffeners, spacing c = stiff_spacing (mm)
+        c = stiff_spacing if stiff_spacing else (1.5 * d)  # typical max spacing
+        if c >= d:
+            limit = 200 * epsilon
+            desc = f"With transverse stiffeners (c ≥ d): d/tw ≤ 200ε = {limit:.1f}"
+        elif c >= 0.74 * d:
+            # c/tw limit is given; but code says "c/tw ≤ 200ε_w". For simplicity we use d/tw ≤ 200ε as well.
+            limit = 200 * epsilon
+            desc = f"With transverse stiffeners (0.74d ≤ c < d): d/tw ≤ 200ε = {limit:.1f}"
+        else:
+            limit = 270 * epsilon
+            desc = f"With transverse stiffeners (c < d): d/tw ≤ 270ε = {limit:.1f}"
+        ok = actual <= limit
+    return ok, limit, actual, desc
 
 def design_flanges(d, tw, Zp_req, fy, manual_bf):
     Zp_web = tw * d**2 / 4
@@ -134,7 +158,7 @@ def weld_design(Vu, Ix_cm4, bf, tf, fu, d):
     s_design = max(min_weld, math.ceil(s_req))
     return s_design, shear_flow
 
-# ---------- Enhanced Drawing Functions ----------
+# ---------- Enhanced Drawing Functions (unchanged) ----------
 def draw_cross_section(d, tw, bf, tf, weld_size):
     fig, ax = plt.subplots(figsize=(7, 6))
     ax.add_patch(Rectangle((-tw/2, -d/2), tw, d, fc='lightblue', ec='black', lw=2))
@@ -254,22 +278,37 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     st.latex(f"d = \\left( \\frac{{{Mu}\\times10^6 \\times {K_actual:.1f}}}{{{fy}}} \\right)^{{1/3}} = {d}\\ \\text{{mm}}")
     st.success(f"✅ **Economical web depth adopted:** `{d} mm`")
     
-    # 3. Web design
+    # 3. Web shear design (unchanged)
     st.subheader("3️⃣ Web Design (Cl. 8.6.1 & 8.4.2.2)")
     st.latex(f"t_w \\ge \\frac{{V_u \\gamma_{{m1}}}}{{d \\cdot (f_y/\\sqrt{{3}})}} = \\frac{{{Vu}\\times1000 \\times 1.25}}{{{d} \\times ({fy}/\\sqrt{{3}})}} = {design_web(d, Vu, fy):.1f}\\ \\text{{mm}}")
     st.latex(f"t_w \\ge \\frac{{d}}{{200}} = \\frac{{{d}}}{{200}} = {d/200:.1f}\\ \\text{{mm}}")
     st.success(f"✅ **Web thickness adopted:** `{tw} mm`")
     
-    # 4. Web slenderness
-    web_ok, web_limit, web_actual = check_web_slenderness(d, tw, fy)
-    st.subheader("4️⃣ Web Slenderness (Unstiffened)")
-    st.latex(f"\\frac{{d}}{{t_w}} = {web_actual:.1f} \\le 67\\varepsilon = 67\\sqrt{{\\frac{{250}}{{{fy}}}}} = {web_limit:.1f}")
-    if web_ok:
-        st.success("✓ Unstiffened web is acceptable.")
+    # 4. Web slenderness (using full Cl. 8.6.1.1)
+    # First determine if stiffeners are required (based on previous logic)
+    need_stiff_initial, _ = stiffener_requirements(d, tw, fy, Vu, 0)  # Vd not used here
+    # For the slenderness check, we will assume stiffeners are provided if the initial assessment says they are required.
+    # We also need a spacing for the check. Use the spacing that would be provided.
+    if need_stiff_initial:
+        spacing = min(1.5 * d, 3000)
+        spacing = round(spacing / 100) * 100
+        has_stiff = True
+        check_spacing = spacing
     else:
-        st.warning("⚠ Intermediate stiffeners required.")
+        has_stiff = False
+        check_spacing = None
     
-    # 5. Flange design
+    web_ok, web_limit, web_actual, web_desc = check_web_slenderness_full(d, tw, fy, has_stiff, check_spacing)
+    
+    st.subheader("4️⃣ Web Slenderness (Cl. 8.6.1.1)")
+    st.latex(f"\\frac{{d}}{{t_w}} = {web_actual:.1f}")
+    st.write(f"**Criteria:** {web_desc}")
+    if web_ok:
+        st.success(f"✓ d/tw = {web_actual:.1f} ≤ {web_limit:.1f} → Web slenderness is within limit.")
+    else:
+        st.error(f"✗ d/tw = {web_actual:.1f} > {web_limit:.1f} → Web too slender. Increase web thickness or provide closer stiffeners.")
+    
+    # 5. Flange design (unchanged)
     bf, tf, Zp_web = design_flanges(d, tw, Zp_req, fy, manual_bf)
     st.subheader("5️⃣ Flange Design (Plastic Section Modulus)")
     st.latex(f"Z_{{p,\\text{{web}}}} = \\frac{{t_w d^2}}{{4}} = {Zp_web:.0f}\\ \\text{{mm}}^3")
@@ -286,7 +325,7 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     else:
         st.error("⚠ Flange is slender — increase tf or reduce bf.")
     
-    # 6. Section capacity
+    # 6. Section capacity (unchanged)
     Zp_actual, Ix_cm4, weight = compute_section_properties(d, tw, bf, tf)
     Md = moment_capacity(Zp_actual, fy)
     Vd = shear_capacity(d, tw, fy)
@@ -304,7 +343,7 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     else:
         st.error("✗ Capacity insufficient — revise section.")
     
-    # 7. Deflection
+    # 7. Deflection (unchanged)
     delta, delta_limit = deflection_check(span, Ix_cm4, w_serv, P_serv, load_type)
     st.subheader("7️⃣ Serviceability: Deflection (Cl. 5.6.1)")
     st.latex(f"I_x = {Ix_cm4:.1f}\\ \\text{{cm}}^4")
@@ -318,7 +357,7 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     else:
         st.warning(f"⚠ High deflection — increase girder stiffness.")
     
-    # 8. Stiffener requirements
+    # 8. Intermediate stiffeners (unchanged logic, but spacing used earlier)
     need_stiff, stiff_spacing = stiffener_requirements(d, tw, fy, Vu, Vd)
     st.subheader("8️⃣ Intermediate Stiffeners (Cl. 8.7.3)")
     if need_stiff:
@@ -326,7 +365,7 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     else:
         st.success("✅ No intermediate stiffeners required.")
     
-    # 9. Weld design
+    # 9. Weld design (unchanged)
     st.subheader("9️⃣ Flange-to-Web Fillet Weld (Cl. 10.5.4)")
     try:
         s_weld, shear_flow = weld_design(Vu, Ix_cm4, bf, tf, fu, d)
@@ -337,14 +376,14 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
         st.error(f"⚠ Weld design could not be completed: {str(e)}")
         s_weld, shear_flow = 6, 0.0
     
-    # 10. Material estimate
+    # 10. Material estimate (unchanged)
     total_weight = weight * span
     st.subheader("🔟 Material Estimate")
     col1, col2 = st.columns(2)
     col1.metric("Weight per meter", f"{weight:.0f} kg/m")
     col2.metric("Total weight", f"{total_weight:.0f} kg ({total_weight/1000:.2f} tonnes)")
     
-    # 11. Detailed Drawings
+    # 11. Detailed Drawings (unchanged)
     st.subheader("📐 Detailed Drawings")
     fig_cross = draw_cross_section(d, tw, bf, tf, s_weld)
     st.pyplot(fig_cross)
@@ -353,7 +392,7 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     fig_plan = draw_top_view(span, bf, tw, stiff_spacing, need_stiff)
     st.pyplot(fig_plan)
     
-    # 12. Final Design Summary Table (NEW)
+    # 12. Final Design Summary Table (unchanged)
     st.subheader("📋 Final Design Summary Table")
     summary_data = {
         "Parameter": [
@@ -380,13 +419,13 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     }
     st.table(summary_data)
     
-    # Engineering Notes
+    # Engineering Notes (updated to reflect slenderness criteria)
     st.subheader("📝 Engineering Notes")
     st.markdown(f"""
     - **Material**: All steel plates are {steel_grade} (f_y = {fy} MPa).
     - **Stiffener Fit**: Bearing stiffeners must be "tight fitted" or "joggled" against the flanges.
     - **Weld Detailing**: Double continuous fillet weld of size {s_weld} mm (or intermittent if code permits).
-    - **Web slenderness**: d/t_w = {web_actual:.1f} {'≤' if web_ok else '>'} {web_limit:.1f} → {'unstiffened web OK' if web_ok else 'stiffeners required'}.
+    - **Web slenderness check (Cl. 8.6.1.1)**: {web_desc} → {('✓ OK' if web_ok else '✗ NOT OK')}.
     - **Flange compactness**: b_f/t_f = {bf_tf:.1f} ≤ {compact_limit:.1f} → compact section.
     - **Economical depth**: Derived iteratively from K = d/t_w = {d/tw:.1f}.
     """)
@@ -403,11 +442,12 @@ else:
     1. **Load calculations** – Factored bending moment and shear force
     2. **Economical depth** – Iterative method using d = (M·K / f_y)^{1/3}
     3. **Web thickness** – Shear capacity and buckling checks
-    4. **Flange sizing** – Plastic modulus and compactness
-    5. **Section capacity** – Moment and shear checks
-    6. **Deflection** – Serviceability limit (L/300)
-    7. **Stiffeners** – Intermediate and bearing
-    8. **Weld design** – Flange-to-web fillet weld
-    9. **Detailed drawings** – Cross-section, elevation, plan
-    10. **Final summary table** – All design parameters at a glance
+    4. **Web slenderness (Cl. 8.6.1.1)** – Limits based on transverse stiffeners and spacing
+    5. **Flange sizing** – Plastic modulus and compactness
+    6. **Section capacity** – Moment and shear checks
+    7. **Deflection** – Serviceability limit (L/300)
+    8. **Stiffeners** – Intermediate and bearing
+    9. **Weld design** – Flange-to-web fillet weld
+    10. **Detailed drawings** – Cross-section, elevation, plan
+    11. **Final summary table** – All design parameters at a glance
     """)
