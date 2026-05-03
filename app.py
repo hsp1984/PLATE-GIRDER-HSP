@@ -1,7 +1,7 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle, Polygon
+from matplotlib.patches import Rectangle
 import math
 
 st.set_page_config(page_title="Plate Girder Designer - IS 800:2007", layout="wide")
@@ -29,11 +29,7 @@ with st.sidebar:
     fu = 410 if fy == 250 else 550
     st.info(f"Yield strength (fy) = **{fy} MPa**  |  Ultimate strength (fu) = **{fu} MPa**")
     
-    st.header("3. Economical Depth Parameter")
-    d_tw_ratio = st.selectbox("Target d/tw ratio (K)", [80, 100, 120, 150, 180], index=1,
-                              help="Typical values: 100–150. Affects economical depth formula.")
-    
-    st.header("4. Optional (Advanced)")
+    st.header("3. Optional (Advanced)")
     manual_bf = st.number_input("Manual flange width (mm) – 0 = auto", min_value=0, value=0, step=10)
     st.markdown("---")
     st.caption("Design as per IS 800:2007, Cl. 8.6 — Beams and Plate Girders")
@@ -53,10 +49,12 @@ def calc_factored_loads(dl, ll, point_load, span, load_type, gamma_f=1.5):
         Vu = P_u / 2
         return Mu, Vu, 0.0, P_serv
 
-def economical_depth(Mu_kNm, fy, K):
+def economical_depth_iterative(Mu_kNm, fy, target_K=100):
+    """Iterative economical depth: start with K=100, refine once."""
     Mu_Nmm = Mu_kNm * 1e6
-    d = (Mu_Nmm * K / fy) ** (1/3)
+    d = (Mu_Nmm * target_K / fy) ** (1/3)
     d = max(400, min(3000, round(d / 10) * 10))
+    # We'll refine after we know tw, but here we just return the initial guess
     return d
 
 def required_plastic_modulus(Mu, fy, gamma_m0=1.10):
@@ -193,7 +191,7 @@ def draw_longitudinal_elevation(span, d, tf, stiff_spacing, need_stiff, end_stif
         while x < span_mm:
             ax.add_patch(Rectangle((x - 6, -d/2 - tf/2), 12, d+tf, fc='salmon', ec='darkred', alpha=0.7))
             x += stiff_spacing
-            # Dimension line for spacing
+            # Dimension line for spacing (only once)
             if x == stiff_spacing + stiff_spacing:
                 ax.annotate('', xy=(stiff_spacing, -d/2 - tf - 40), xytext=(2*stiff_spacing, -d/2 - tf - 40),
                             arrowprops=dict(arrowstyle='<->', lw=1))
@@ -235,9 +233,9 @@ def draw_top_view(span, bf, tw, stiff_spacing, need_stiff, end_stiff_outstand=18
     # Dimensions
     ax.annotate('', xy=(0, bf/2 + 20), xytext=(span_mm, bf/2 + 20), arrowprops=dict(arrowstyle='<->', lw=1))
     ax.text(span_mm/2, bf/2 + 30, f'Span = {span} m', ha='center', fontsize=10)
-    ax.annotate('', xy=(stiff_spacing, -bf/2 - 30), xytext=(2*stiff_spacing if need_stiff else stiff_spacing, -bf/2 - 30),
-                arrowprops=dict(arrowstyle='<->', lw=1))
     if need_stiff and stiff_spacing:
+        ax.annotate('', xy=(stiff_spacing, -bf/2 - 30), xytext=(2*stiff_spacing, -bf/2 - 30),
+                    arrowprops=dict(arrowstyle='<->', lw=1))
         ax.text(1.5*stiff_spacing, -bf/2 - 40, f'{stiff_spacing} mm c/c', ha='center', fontsize=8)
     ax.text(span_mm/2, -tw/2 - 20, f'Web: t_w = {tw} mm', ha='center', fontsize=9)
     ax.text(span_mm/2, bf/2 + 50, f'Flange width = {bf} mm', ha='center', fontsize=9)
@@ -267,17 +265,21 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
         st.metric("Factored Moment", f"{Mu:.1f} kN·m")
         st.metric("Factored Shear", f"{Vu:.1f} kN")
     
-    # 2. Economical Depth using user-selected K = d/tw
+    # 2. Economical Depth (iterative, original method)
     st.subheader("2️⃣ Economical Depth (Cl. 8.6 - approximate method)")
-    K = d_tw_ratio
-    d = economical_depth(Mu, fy, K)
-    tw_temp = design_web(d, Vu, fy)
-    # Recompute with actual K if needed (optional, we keep user's choice)
-    st.latex(r"d = \left( \frac{M_u \cdot K}{f_y} \right)^{1/3}, \quad K = \frac{d}{t_w} = " + str(K))
-    st.latex(f"d = \\left( \\frac{{{Mu}\\times10^6 \\times {K}}}{{{fy}}} \\right)^{{1/3}} = {d:.0f}\\ \\text{{mm}}")
+    # First guess with K=100
+    d_guess = economical_depth_iterative(Mu, fy, target_K=100)
+    # Tentative web thickness for that depth
+    tw_temp = design_web(d_guess, Vu, fy)
+    K_actual = d_guess / tw_temp
+    # Recompute depth with actual K (one iteration)
+    d = economical_depth_iterative(Mu, fy, target_K=K_actual)
     d = max(400, min(3000, round(d / 10) * 10))
     tw = design_web(d, Vu, fy)
-    st.success(f"✅ **Economical web depth adopted:** `{d} mm` (using K={K})")
+    st.latex(r"d = \left( \frac{M_u \cdot K}{f_y} \right)^{1/3}, \quad K = \frac{d}{t_w}")
+    st.write(f"Iteration: initial K = 100 → actual K = {K_actual:.1f} → final d = {d} mm")
+    st.latex(f"d = \\left( \\frac{{{Mu}\\times10^6 \\times {K_actual:.1f}}}{{{fy}}} \\right)^{{1/3}} = {d}\\ \\text{{mm}}")
+    st.success(f"✅ **Economical web depth adopted:** `{d} mm`")
     
     # 3. Web design
     st.subheader("3️⃣ Web Design (Cl. 8.6.1 & 8.4.2.2)")
@@ -386,7 +388,7 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     - **Weld Detailing**: Double continuous fillet weld of size {s_weld} mm (or intermittent if code permits).
     - **Web slenderness**: d/t_w = {web_actual:.1f} {'≤' if web_ok else '>'} {web_limit:.1f} → {'unstiffened web OK' if web_ok else 'stiffeners required'}.
     - **Flange compactness**: b_f/t_f = {bf_tf:.1f} ≤ {compact_limit:.1f} → compact section.
-    - **Economical depth**: Used K = d/t_w = {K} as selected.
+    - **Economical depth**: Derived iteratively from K = d/t_w = {d/tw:.1f}.
     """)
     
     # Developer name
@@ -399,7 +401,7 @@ else:
     st.markdown("""
     ### 📖 Design Steps (As per IS 800:2007)
     1. **Load calculations** – Factored bending moment and shear force
-    2. **Economical depth** – Using d = (M·K / f_y)^{1/3} with user-selected K (= d/t_w)
+    2. **Economical depth** – Iterative method using d = (M·K / f_y)^{1/3}
     3. **Web thickness** – Shear capacity and buckling checks
     4. **Flange sizing** – Plastic modulus and compactness
     5. **Section capacity** – Moment and shear checks
