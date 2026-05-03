@@ -236,62 +236,65 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     
     # 1. Factored loads
     with st.expander("📐 1. Factored Loads & Required Plastic Modulus", expanded=True):
-        st.latex(r"\text{For UDL: } M_u = \frac{1.5 \times (DL+LL) \times L^2}{8}, \quad V_u = \frac{1.5 \times (DL+LL) \times L}{2}")
-        st.latex(r"\text{For point load: } M_u = \frac{1.5 \times P \times L}{4}, \quad V_u = \frac{1.5 \times P}{2}")
-        st.latex(f"M_u = {Mu:.1f}\ \text{{kN·m}},\quad V_u = {Vu:.1f}\ \text{{kN}}")
-        # Fixed f-string with double braces
-        st.latex(fr"Z_{{p,\text{{req}}}} = \frac{{M_u \cdot \gamma_{{m0}}}}{{f_y}} = \frac{{{Mu:.1f}\times10^6 \times 1.1}}{{{fy}}} = {Zp_req:.0f}\ \text{{mm}}^3")
+        st.latex(r"\text{For UDL: } M_u = \frac{1.5 (DL+LL) L^2}{8},\quad V_u = \frac{1.5 (DL+LL) L}{2}")
+        st.latex(r"\text{For point load: } M_u = \frac{1.5 P L}{4},\quad V_u = \frac{1.5 P}{2}")
+        st.latex(f"M_u = {Mu:.1f} \\, \\text{{kN·m}},\\quad V_u = {Vu:.1f} \\, \\text{{kN}}")
+        st.latex(fr"Z_{{p,\text{{req}}}} = \frac{{M_u \gamma_{{m0}}}}{{f_y}} = \frac{{{Mu:.1f}\times10^6 \times 1.1}}{{{fy}}} = {Zp_req:.0f} \\, \\text{{mm}}^3")
     
     # 2. Economical depth
     with st.expander("📐 2. Economical Depth (Cl. 8.6)", expanded=True):
-        st.latex(r"d = \left( \frac{M_u \cdot K}{f_y} \right)^{1/3}, \quad K = \frac{d}{t_w}")
-        st.latex(f"K = {d/tw:.1f} \quad \Rightarrow \quad d = {d}\ \text{{mm}}")
+        st.latex(r"d = \left( \frac{M_u K}{f_y} \right)^{1/3},\quad K = d/t_w")
+        st.latex(f"K = {d/tw:.1f} \\quad \\Rightarrow \\quad d = {d} \\, \\text{{mm}}")
     
     # 3. Web shear design
     with st.expander("📐 3. Web Thickness (Cl. 8.4.2.2)", expanded=True):
-        st.latex(r"t_w \ge \frac{V_u \gamma_{m1}}{d \cdot (f_y/\sqrt{3})} \quad \text{and} \quad t_w \ge d/200")
-        st.latex(f"t_w = {tw}\ \text{{mm}}")
+        st.latex(r"t_w \ge \frac{V_u \gamma_{m1}}{d (f_y/\sqrt{3})},\quad t_w \ge d/200")
+        st.latex(f"t_w = {tw} \\, \\text{{mm}}")
     
     # 4. Shear buckling resistance
     with st.expander("📐 4. Shear Buckling Resistance (Cl. 8.4.2.2)", expanded=True):
-        st.latex(r"\lambda_w = \frac{d/t_w}{37.4\,\varepsilon\sqrt{k_v}}, \quad \varepsilon = \sqrt{250/f_y}")
-        st.latex(f"\lambda_w = {λ_w:.3f}")
-        st.latex(r"\tau_b = \begin{cases} f_y/\sqrt{3} & \lambda_w \le 0.8 \\ [1-0.8(\lambda_w-0.8)]f_y/\sqrt{3} & 0.8<\lambda_w<1.2 \\ f_y/(\sqrt{3}\,\lambda_w^2) & \lambda_w\ge1.2 \end{cases}")
+        st.latex(r"\lambda_w = \frac{d/t_w}{37.4\,\varepsilon\sqrt{k_v}},\quad \varepsilon = \sqrt{250/f_y}")
+        st.latex(f"\\lambda_w = {λ_w:.3f}")
+        st.latex(r"\tau_b = \begin{cases}
+        f_y/\sqrt{3} & \lambda_w \le 0.8 \\
+        [1-0.8(\lambda_w-0.8)]f_y/\sqrt{3} & 0.8<\lambda_w<1.2 \\
+        f_y/(\sqrt{3}\,\lambda_w^2) & \lambda_w\ge1.2
+        \end{cases}")
         st.latex(f"\\tau_b \\text{{ from {shear_method}}}")
-        # Recompute Vn for display
         Vn_temp = shear_buckling_strength(d, tw, fy, need_stiff, stiff_spacing, use_tension_field)[0]
-        st.latex(f"V_n = A_v \\cdot \\tau_b = {Vn_temp:.1f}\ \text{{kN}}")
-        st.latex(f"V_d = V_n / \gamma_{{m1}} = {Vd:.2f}\ \text{{kN}}")
+        st.latex(f"V_n = A_v \\tau_b = {Vn_temp:.1f} \\, \\text{{kN}}")
+        st.latex(f"V_d = V_n / \\gamma_{{m1}} = {Vd:.2f} \\, \\text{{kN}}")
     
     # 5. Web slenderness
     with st.expander("📐 5. Web Slenderness (Cl. 8.6.1.1)", expanded=True):
-        st.latex(r"\frac{d}{t_w} = " + f"{web_actual:.1f}")
+        st.latex(f"d/t_w = {web_actual:.1f}")
         st.write(f"**Criteria:** {web_desc}")
         st.write(f"→ {'✓ OK' if web_ok else '✗ NOT OK'}")
     
     # 6. Flange design & section capacity
     bf_tf_ratio = bf / tf
-    epsilon = math.sqrt(250 / fy)
-    compact_limit = 9.4 * epsilon
+    epsilon_val = math.sqrt(250 / fy)
+    compact_limit = 9.4 * epsilon_val
     with st.expander("📐 6. Flange Design & Section Capacity", expanded=True):
         Zp_web = tw * d**2 / 4
-        st.latex(r"Z_{p,\text{web}} = \frac{t_w d^2}{4} = " + f"{Zp_web:.0f}\ \text{{mm}}^3")
+        st.latex(r"Z_{p,\text{web}} = \frac{t_w d^2}{4} = " + f"{Zp_web:.0f} \\, \\text{{mm}}^3")
         Af_req_val = max(0, (Zp_req - Zp_web) / d)
-        st.latex(r"A_{f,\text{req}} = \frac{Z_{p,\text{req}} - Z_{p,\text{web}}}{d} \approx " + f"{Af_req_val:.0f}\ \text{{mm}}^2")
-        st.latex(f"b_f = {bf:.0f}\ \text{{mm}}, \\quad t_f = {tf:.1f}\ \text{{mm}}")
-        st.latex(f"Z_{{p,\text{{actual}}}} = {Zp_actual:.0f}\ \text{{mm}}^3")
-        st.latex(f"M_d = \\frac{{Z_p f_y}}{{\\gamma_{{m0}}}} = {Md:.2f}\ \text{{kN·m}}")
+        st.latex(r"A_{f,\text{req}} = \frac{Z_{p,\text{req}} - Z_{p,\text{web}}}{d} \approx " + f"{Af_req_val:.0f} \\, \\text{{mm}}^2")
+        st.latex(f"b_f = {bf:.0f} \\, \\text{{mm}},\\quad t_f = {tf:.1f} \\, \\text{{mm}}")
+        st.latex(f"Z_{{p,\text{{actual}}}} = {Zp_actual:.0f} \\, \\text{{mm}}^3")
+        st.latex(f"M_d = \\frac{{Z_p f_y}}{{\\gamma_{{m0}}}} = {Md:.2f} \\, \\text{{kN·m}}")
         st.latex(f"b_f/t_f = {bf_tf_ratio:.1f} \\le 9.4\\varepsilon = {compact_limit:.1f} \\Rightarrow {'compact' if bf_tf_ratio <= compact_limit else 'slender'}")
     
     # 7. Deflection
     with st.expander("📐 7. Deflection (Cl. 5.6.1)", expanded=True):
-        st.latex(r"\delta_{\text{limit}} = L/300 = " + f"{delta_limit:.1f}\ \text{{mm}}")
-        st.latex(f"\\delta = {delta:.1f}\ \text{{mm}} \\Rightarrow {'OK' if delta<=delta_limit else 'NOT OK'}")
+        st.latex(r"\delta_{\text{limit}} = L/300 = " + f"{delta_limit:.1f} \\, \\text{{mm}}")
+        st.latex(f"\\delta = {delta:.1f} \\, \\text{{mm}} \\Rightarrow {'OK' if delta<=delta_limit else 'NOT OK'}")
     
     # 8. Stiffeners
     with st.expander("📐 8. Intermediate Stiffeners (Cl. 8.7.3)", expanded=True):
         if need_stiff:
             st.warning(f"Stiffeners required at spacing ≤ {stiff_spacing} mm")
+            st.latex(r"c \le 1.5d,\quad c = " + f"{stiff_spacing} \\, \\text{{mm}}")
         else:
             st.success("No intermediate stiffeners required")
     
