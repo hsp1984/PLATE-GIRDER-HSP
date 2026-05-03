@@ -1,7 +1,7 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle, Polygon, FancyBboxPatch
+from matplotlib.patches import Rectangle
 import math
 
 st.set_page_config(page_title="Plate Girder Designer - IS 800:2007", layout="wide")
@@ -26,7 +26,7 @@ with st.sidebar:
     st.header("2. Material Properties")
     steel_grade = st.selectbox("Steel grade", ["Fe 250", "Fe 410", "Fe 450"])
     fy = 250 if "250" in steel_grade else 410 if "410" in steel_grade else 450
-    fu = 410 if fy == 250 else 550  # approximate ultimate strength for weld design
+    fu = 410 if fy == 250 else 550
     st.info(f"Yield strength (fy) = **{fy} MPa**  |  Ultimate strength (fu) = **{fu} MPa**")
     
     st.header("3. Optional (Advanced)")
@@ -50,7 +50,6 @@ def calc_factored_loads(dl, ll, point_load, span, load_type, gamma_f=1.5):
         return Mu, Vu, 0.0, P_serv
 
 def economical_depth(Mu_kNm, fy, K=100):
-    """Iterative economical depth: d = (M * K / fy)^(1/3)  (M in Nmm, d in mm)"""
     Mu_Nmm = Mu_kNm * 1e6
     d = (Mu_Nmm * K / fy) ** (1/3)
     d = max(400, min(3000, round(d / 10) * 10))
@@ -123,7 +122,9 @@ def stiffener_requirements(d, tw, fy, Vu, Vd):
     return True, spacing
 
 def weld_design(Vu, Ix_cm4, bf, tf, fu, d):
-    """Design flange-to-web fillet weld."""
+    """Design flange-to-web fillet weld with safe defaults."""
+    if Ix_cm4 <= 0:
+        return 6, 0.0  # fallback values
     Ix_mm4 = Ix_cm4 * 1e4
     y_bar = (d + tf) / 2
     Q = bf * tf * y_bar
@@ -136,23 +137,12 @@ def weld_design(Vu, Ix_cm4, bf, tf, fu, d):
 
 # ---------- Drawing Functions ----------
 def draw_cross_section(d, tw, bf, tf, weld_size):
-    """Draw cross-section at support (similar to image)."""
     fig, ax = plt.subplots(figsize=(6, 6))
-    # Web
-    web_rect = Rectangle((-tw/2, -d/2), tw, d, fc='lightblue', ec='black', lw=2)
-    ax.add_patch(web_rect)
-    # Top flange
-    top_flange = Rectangle((-bf/2, d/2), bf, tf, fc='steelblue', ec='black', lw=2)
-    ax.add_patch(top_flange)
-    # Bottom flange
-    bottom_flange = Rectangle((-bf/2, -d/2 - tf), bf, tf, fc='steelblue', ec='black', lw=2)
-    ax.add_patch(bottom_flange)
-    # Weld symbols (small circles or lines)
-    weld_y_top = d/2
-    weld_y_bot = -d/2 - tf
-    for y in [weld_y_top, weld_y_bot]:
-        ax.plot([-bf/4, bf/4], [y, y], 'r--', lw=2, label='Weld' if y==weld_y_top else "")
-    # Dimensions
+    ax.add_patch(Rectangle((-tw/2, -d/2), tw, d, fc='lightblue', ec='black', lw=2))
+    ax.add_patch(Rectangle((-bf/2, d/2), bf, tf, fc='steelblue', ec='black', lw=2))
+    ax.add_patch(Rectangle((-bf/2, -d/2 - tf), bf, tf, fc='steelblue', ec='black', lw=2))
+    for y in [d/2, -d/2 - tf]:
+        ax.plot([-bf/4, bf/4], [y, y], 'r--', lw=2)
     ax.annotate(f'Web: {d}×{tw}', xy=(0, 0), ha='center', va='center', fontsize=10, bbox=dict(boxstyle='round', fc='white'))
     ax.annotate(f'Flange: {bf}×{tf}', xy=(bf/2+10, d/2+tf/2), ha='left', fontsize=9)
     ax.annotate(f'Weld: {weld_size} mm', xy=(bf/2+10, d/2+10), ha='left', fontsize=8, color='red')
@@ -163,77 +153,54 @@ def draw_cross_section(d, tw, bf, tf, weld_size):
     ax.set_title('Cross-Section (at Support)', fontsize=12, fontweight='bold')
     return fig
 
-def draw_longitudinal_elevation(span, d, tf, stiff_spacing, need_stiff, end_stiff_width=180, end_stiff_thick=10):
-    """Draw longitudinal elevation with stiffeners."""
+def draw_longitudinal_elevation(span, d, tf, stiff_spacing, need_stiff, end_stiff_outstand=180, end_stiff_thick=10):
     fig, ax = plt.subplots(figsize=(12, 4))
-    span_plot = span * 1000  # mm in plot
+    span_mm = span * 1000
     y_center = 0
-    # Web rectangle
-    web_width = span_plot
-    web_rect = Rectangle((0, -d/2), web_width, d, fc='lightblue', ec='black', lw=1.5)
-    ax.add_patch(web_rect)
-    # Top flange
-    top_flange = Rectangle((0, d/2), web_width, tf, fc='steelblue', ec='black', lw=1.5)
-    ax.add_patch(top_flange)
-    # Bottom flange
-    bottom_flange = Rectangle((0, -d/2 - tf), web_width, tf, fc='steelblue', ec='black', lw=1.5)
-    ax.add_patch(bottom_flange)
-    # End bearing stiffeners (two per side, schematically)
-    end_stiff_outstand = 180
-    end_stiff_thick_draw = 10
-    # Left end
+    ax.add_patch(Rectangle((0, -d/2), span_mm, d, fc='lightblue', ec='black', lw=1.5))
+    ax.add_patch(Rectangle((0, d/2), span_mm, tf, fc='steelblue', ec='black', lw=1.5))
+    ax.add_patch(Rectangle((0, -d/2 - tf), span_mm, tf, fc='steelblue', ec='black', lw=1.5))
+    # End bearing stiffeners
     ax.add_patch(Rectangle((-end_stiff_outstand, -d/2 - tf/2), end_stiff_outstand, d+tf, fc='peru', ec='brown', lw=1.5, alpha=0.8))
-    ax.add_patch(Rectangle((-end_stiff_outstand - end_stiff_thick_draw, -d/2 - tf/2), end_stiff_thick_draw, d+tf, fc='peru', ec='brown', lw=1.5, alpha=0.8))
-    # Right end
-    ax.add_patch(Rectangle((span_plot, -d/2 - tf/2), end_stiff_outstand, d+tf, fc='peru', ec='brown', lw=1.5, alpha=0.8))
-    ax.add_patch(Rectangle((span_plot + end_stiff_thick_draw, -d/2 - tf/2), end_stiff_thick_draw, d+tf, fc='peru', ec='brown', lw=1.5, alpha=0.8))
+    ax.add_patch(Rectangle((-end_stiff_outstand - end_stiff_thick, -d/2 - tf/2), end_stiff_thick, d+tf, fc='peru', ec='brown', lw=1.5, alpha=0.8))
+    ax.add_patch(Rectangle((span_mm, -d/2 - tf/2), end_stiff_outstand, d+tf, fc='peru', ec='brown', lw=1.5, alpha=0.8))
+    ax.add_patch(Rectangle((span_mm + end_stiff_thick, -d/2 - tf/2), end_stiff_thick, d+tf, fc='peru', ec='brown', lw=1.5, alpha=0.8))
     # Intermediate stiffeners
     if need_stiff and stiff_spacing:
-        spacing_mm = stiff_spacing
-        x = spacing_mm
-        while x < span_plot:
+        x = stiff_spacing
+        while x < span_mm:
             ax.add_patch(Rectangle((x - 6, -d/2 - tf/2), 12, d+tf, fc='salmon', ec='darkred', alpha=0.7))
-            x += spacing_mm
-    # Annotations
-    ax.annotate('End bearing stiffeners\n180×10 when 2 flats', xy=(-150, 0), ha='center', fontsize=8, bbox=dict(boxstyle='round', fc='white'))
+            x += stiff_spacing
+    ax.annotate('End bearing stiffeners\n180×10 (two flats)', xy=(-150, 0), ha='center', fontsize=8, bbox=dict(boxstyle='round', fc='white'))
     if need_stiff and stiff_spacing:
-        ax.annotate(f'Intermediate stiffeners\n{stiff_spacing} mm c/c', xy=(span_plot/2, d/2+tf+20), ha='center', fontsize=8)
-    ax.annotate(f'Span = {span} m', xy=(span_plot/2, -d/2 - tf - 30), ha='center', fontsize=10, fontweight='bold')
-    ax.set_xlim(-250, span_plot + 250)
+        ax.annotate(f'Intermediate stiffeners\n{stiff_spacing} mm c/c', xy=(span_mm/2, d/2+tf+20), ha='center', fontsize=8)
+    ax.annotate(f'Span = {span} m', xy=(span_mm/2, -d/2 - tf - 30), ha='center', fontsize=10, fontweight='bold')
+    ax.set_xlim(-250, span_mm + 250)
     ax.set_ylim(-d/2 - tf - 80, d/2 + tf + 60)
     ax.set_aspect('equal')
     ax.axis('off')
     ax.set_title('Longitudinal Elevation', fontsize=12, fontweight='bold')
     return fig
 
-def draw_top_view(span, bf, tw, stiff_spacing, need_stiff, end_stiff_width=180):
-    """Draw sectional plan (top view) similar to image."""
+def draw_top_view(span, bf, tw, stiff_spacing, need_stiff, end_stiff_outstand=180):
     fig, ax = plt.subplots(figsize=(12, 3))
-    span_plot = span * 1000
-    # Web (narrow strip)
-    ax.add_patch(Rectangle((0, -tw/2), span_plot, tw, fc='lightblue', ec='black', lw=1.5))
-    # Flange (wider)
-    ax.add_patch(Rectangle((0, -bf/2), span_plot, bf, fc='steelblue', ec='black', lw=1.5, fill=False, hatch='//'))
-    # End bearing stiffeners (top view)
-    end_stiff_outstand = end_stiff_width
+    span_mm = span * 1000
+    ax.add_patch(Rectangle((0, -tw/2), span_mm, tw, fc='lightblue', ec='black', lw=1.5))
+    ax.add_patch(Rectangle((0, -bf/2), span_mm, bf, fc='steelblue', ec='black', lw=1.5, fill=False, hatch='//'))
     ax.add_patch(Rectangle((-end_stiff_outstand, -bf/2), end_stiff_outstand, bf, fc='peru', ec='brown', lw=1.5, alpha=0.6))
-    ax.add_patch(Rectangle((span_plot, -bf/2), end_stiff_outstand, bf, fc='peru', ec='brown', lw=1.5, alpha=0.6))
-    # Intermediate stiffeners (top view)
+    ax.add_patch(Rectangle((span_mm, -bf/2), end_stiff_outstand, bf, fc='peru', ec='brown', lw=1.5, alpha=0.6))
     if need_stiff and stiff_spacing:
-        spacing = stiff_spacing
-        x = spacing
-        while x < span_plot:
+        x = stiff_spacing
+        while x < span_mm:
             ax.add_patch(Rectangle((x - 6, -bf/2), 12, bf, fc='salmon', ec='darkred', alpha=0.7))
-            x += spacing
-    # Weld lines (dashed)
-    ax.plot([0, span_plot], [-bf/4, -bf/4], 'r--', lw=2, label='Weld lines')
-    ax.plot([0, span_plot], [bf/4, bf/4], 'r--', lw=2)
-    # Annotations
-    ax.annotate(f'Web: {tw} mm', xy=(span_plot/2, -tw/2-20), ha='center', fontsize=9)
-    ax.annotate(f'Flange: {bf} mm wide', xy=(span_plot/2, bf/2+15), ha='center', fontsize=9)
+            x += stiff_spacing
+    ax.plot([0, span_mm], [-bf/4, -bf/4], 'r--', lw=2)
+    ax.plot([0, span_mm], [bf/4, bf/4], 'r--', lw=2)
+    ax.annotate(f'Web: {tw} mm', xy=(span_mm/2, -tw/2-20), ha='center', fontsize=9)
+    ax.annotate(f'Flange: {bf} mm wide', xy=(span_mm/2, bf/2+15), ha='center', fontsize=9)
     if need_stiff and stiff_spacing:
-        ax.annotate(f'Stiffener spacing = {stiff_spacing} mm c/c', xy=(span_plot/2, bf/2+35), ha='center', fontsize=8)
-    ax.set_xlim(-200, span_plot + 200)
+        ax.annotate(f'Stiffener spacing = {stiff_spacing} mm c/c', xy=(span_mm/2, bf/2+35), ha='center', fontsize=8)
+    ax.set_xlim(-200, span_mm + 200)
     ax.set_ylim(-bf/2 - 60, bf/2 + 60)
     ax.set_aspect('equal')
     ax.axis('off')
@@ -258,7 +225,7 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
         st.metric("Factored Moment", f"{Mu:.1f} kN·m")
         st.metric("Factored Shear", f"{Vu:.1f} kN")
     
-    # 2. Economical Depth (Cl. 8.6 - approximate method)
+    # 2. Economical Depth
     st.subheader("2️⃣ Economical Depth (Cl. 8.6 - approximate method)")
     K_initial = 100
     d = economical_depth(Mu, fy, K_initial)
@@ -278,7 +245,7 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     st.latex(f"t_w \\ge \\frac{{d}}{{200}} = \\frac{{{d}}}{{200}} = {d/200:.1f}\\ \\text{{mm}}")
     st.success(f"✅ **Web thickness adopted:** `{tw} mm`")
     
-    # 4. Web slenderness check
+    # 4. Web slenderness
     web_ok, web_limit, web_actual = check_web_slenderness(d, tw, fy)
     st.subheader("4️⃣ Web Slenderness (Unstiffened)")
     st.latex(f"\\frac{{d}}{{t_w}} = {web_actual:.1f} \\le 67\\varepsilon = 67\\sqrt{{\\frac{{250}}{{{fy}}}}} = {web_limit:.1f}")
@@ -295,7 +262,6 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     st.latex(f"A_{{f,\\text{{req}}}} = \\frac{{{Zp_req:.0f} - {Zp_web:.0f}}}{{{d}}} = {Af_req:.0f}\\ \\text{{mm}}^2")
     st.latex(f"b_f \\text{{ (recommended)}} \\approx d/4 = {d/4:.0f}\\ \\text{{mm}} \\rightarrow \\text{{Adopted }} b_f = {bf:.0f}\\ \\text{{mm}}")
     st.latex(f"t_f = \\frac{{A_{{f,\\text{{req}}}}}}{{b_f}} = {tf:.1f}\\ \\text{{mm}}")
-    # Flange compactness
     epsilon = math.sqrt(250 / fy)
     compact_limit = 9.4 * epsilon
     bf_tf = bf / tf
@@ -305,7 +271,7 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     else:
         st.error("⚠ Flange is slender — increase tf or reduce bf.")
     
-    # 6. Section properties & capacity
+    # 6. Section capacity
     Zp_actual, Ix_cm4, weight = compute_section_properties(d, tw, bf, tf)
     Md = moment_capacity(Zp_actual, fy)
     Vd = shear_capacity(d, tw, fy)
@@ -316,8 +282,8 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     ratio_moment = Mu / Md
     ratio_shear = Vu / Vd
     col1, col2 = st.columns(2)
-    col1.metric("Moment ratio", f"{ratio_moment:.3f}", help="≤ 1.0 OK")
-    col2.metric("Shear ratio", f"{ratio_shear:.3f}", help="≤ 1.0 OK")
+    col1.metric("Moment ratio", f"{ratio_moment:.3f}")
+    col2.metric("Shear ratio", f"{ratio_shear:.3f}")
     if ratio_moment <= 1.0 and ratio_shear <= 1.0:
         st.success("✓ Moment and shear capacities are adequate.")
     else:
@@ -345,12 +311,16 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     else:
         st.success("✅ No intermediate stiffeners required.")
     
-    # 9. Weld design
-    s_weld, shear_flow = weld_design(Vu, Ix_cm4, bf, tf, fu, d)
+    # 9. Weld design (with error handling)
     st.subheader("9️⃣ Flange-to-Web Fillet Weld (Cl. 10.5.4)")
-    st.latex(f"\\text{{Shear flow: }} q = \\frac{{V_u Q}}{I} = {shear_flow:.1f}\\ \\text{{N/mm}}")
-    st.latex(f"\\text{{Required weld leg size }} s \\ge {s_weld-0.1:.1f}\\ \\text{{mm}}")
-    st.success(f"✅ **Provide double continuous fillet weld of leg size `{s_weld} mm`**")
+    try:
+        s_weld, shear_flow = weld_design(Vu, Ix_cm4, bf, tf, fu, d)
+        st.latex(f"\\text{{Shear flow: }} q = \\frac{{V_u Q}}{I} = {shear_flow:.1f}\\ \\text{{N/mm}}")
+        st.latex(f"\\text{{Required weld leg size }} s \\ge {s_weld-0.1:.1f}\\ \\text{{mm}}")
+        st.success(f"✅ **Provide double continuous fillet weld of leg size `{s_weld} mm`**")
+    except Exception as e:
+        st.error(f"⚠ Weld design could not be completed: {str(e)}")
+        s_weld, shear_flow = 6, 0.0
     
     # 10. Material estimate
     total_weight = weight * span
@@ -359,24 +329,21 @@ if st.sidebar.button("🚀 Design Plate Girder", type="primary", use_container_w
     col1.metric("Weight per meter", f"{weight:.0f} kg/m")
     col2.metric("Total weight", f"{total_weight:.0f} kg ({total_weight/1000:.2f} tonnes)")
     
-    # 11. Detailed Drawings (Cross-section, Elevation, Plan)
+    # 11. Detailed Drawings
     st.subheader("📐 Detailed Drawings (as per image.png)")
-    # Cross-section
     fig_cross = draw_cross_section(d, tw, bf, tf, s_weld)
     st.pyplot(fig_cross)
-    # Longitudinal elevation
     fig_elev = draw_longitudinal_elevation(span, d, tf, stiff_spacing, need_stiff)
     st.pyplot(fig_elev)
-    # Top view
     fig_plan = draw_top_view(span, bf, tw, stiff_spacing, need_stiff)
     st.pyplot(fig_plan)
     
-    # Final Engineering Notes
+    # Engineering Notes
     st.subheader("📝 Engineering Notes")
     st.markdown(f"""
     - **Material**: All steel plates are {steel_grade} (f_y = {fy} MPa).
-    - **Stiffener Fit**: Bearing stiffeners must be "tight fitted" or "joggled" against the flanges to ensure direct load transfer.
-    - **Weld Detailing**: Double continuous fillet weld of size {s_weld} mm (or intermittent welds if permitted by code).
+    - **Stiffener Fit**: Bearing stiffeners must be "tight fitted" or "joggled" against the flanges.
+    - **Weld Detailing**: Double continuous fillet weld of size {s_weld} mm (or intermittent if code permits).
     - **Web slenderness**: d/t_w = {web_actual:.1f} {'≤' if web_ok else '>'} {web_limit:.1f} → {'unstiffened web OK' if web_ok else 'stiffeners required'}.
     - **Flange compactness**: b_f/t_f = {bf_tf:.1f} ≤ {compact_limit:.1f} → compact section.
     """)
