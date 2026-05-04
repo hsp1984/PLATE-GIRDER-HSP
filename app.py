@@ -4,7 +4,7 @@ import math
 
 st.set_page_config(page_title="Plate Girder Designer - IS 800:2007", layout="wide")
 st.title("🏗️ Steel Plate Girder Designer (Shear Buckling + Auto‑Revision)")
-st.markdown("**👨‍🏫 Developer:** *Dr Hiteshkumar Santosh Patil, Assistant Professor, Civil Engineering Department, RCPIT, Shirpur*")
+st.markdown("**👨‍🏫 Developer:** *Dr Hiteshkumar Santosh Patil, Assistant Professor, Email: hitesh.patil@rcpit.ac.in, Civil Engineering Department, RCPIT SHIRPUR*")
 st.markdown("Design as per **IS 800:2007 (Limit State Method)**")
 st.markdown("---")
 
